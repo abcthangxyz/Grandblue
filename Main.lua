@@ -33,6 +33,7 @@ local Tabs = {
     Farm = Window:AddTab("Farm", "swords"),
     Player = Window:AddTab("Player", "user"),
     Shop = Window:AddTab("Shop", "shopping-cart"),
+    ESP = Window:AddTab("ESP", "eye"),
     World = Window:AddTab("World", "globe"),
 }
 
@@ -47,6 +48,21 @@ local State = {
     savedPos = nil,
     retreatHP = 30,
     alertRange = 50,
+    -- ESP
+    playerESP = false,
+    mobESP = false,
+    espPlayerColor = Color3.fromRGB(255, 255, 0),
+    espMobColor = Color3.fromRGB(255, 50, 50),
+    espShowName = true,
+    espShowDist = true,
+    espShowHP = true,
+    espRange = 500,
+    espBoxes = true,
+    espObjects = {},
+    -- Attach
+    attachTarget = nil,
+    attachDist = 3,
+    attachHeight = 0,
     loops = {},
     conns = {},
 }
@@ -381,6 +397,181 @@ Tele:AddSlider("AlertRange", {Text="Alert Range", Default=50, Min=10, Max=500, R
 Tele:AddToggle("ClickTP", {Text="Click TP", Default=false, Callback=function(on)
     if State.conns.clickTP then State.conns.clickTP:Disconnect(); State.conns.clickTP=nil end
     if on then State.conns.clickTP=UserInputService.InputBegan:Connect(function(input,gp) if gp or input.UserInputType~=Enum.UserInputType.MouseButton1 then return end; local r=root(); local cam=workspace.CurrentCamera; if not r or not cam then return end; local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances={char()}; local hit=workspace:Raycast(cam.CFrame.Position,cam.CFrame.LookVector*500,params); if hit then r.CFrame=CFrame.new(hit.Position+Vector3.new(0,3,0)) end end) end
+end})
+
+-- ============================================================
+-- ESP
+-- ============================================================
+local function clearESP()
+    for _, v in pairs(State.espObjects) do
+        pcall(function() v:Remove() end)
+    end
+    State.espObjects = {}
+end
+
+local function makeLabel(text, pos, color, size)
+    local lbl = Drawing.new("Text")
+    lbl.Text = text
+    lbl.Color = color or Color3.fromRGB(255,255,255)
+    lbl.Size = size or 13
+    lbl.Position = pos
+    lbl.Outline = true
+    lbl.Visible = true
+    table.insert(State.espObjects, lbl)
+    return lbl
+end
+
+local function makeBox(pos, size, color)
+    local box = Drawing.new("Square")
+    box.Color = color or Color3.fromRGB(255,255,0)
+    box.Size = size
+    box.Position = pos
+    box.Thickness = 1
+    box.Filled = false
+    box.Visible = true
+    table.insert(State.espObjects, box)
+    return box
+end
+
+local function updateESP()
+    clearESP()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local hrp = root()
+
+    -- Player ESP
+    if State.playerESP then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local pr = p.Character:FindFirstChild("HumanoidRootPart")
+                local ph = p.Character:FindFirstChildOfClass("Humanoid")
+                if pr and ph then
+                    local dist = hrp and (hrp.Position - pr.Position).Magnitude or 0
+                    if dist <= State.espRange then
+                        local pos, onScreen = cam:WorldToViewportPoint(pr.Position)
+                        if onScreen then
+                            local vpos = Vector2.new(pos.X, pos.Y)
+                            if State.espBoxes then
+                                makeBox(vpos - Vector2.new(20, 35), Vector2.new(40, 60), State.espPlayerColor)
+                            end
+                            local yOff = -45
+                            if State.espShowName then
+                                makeLabel(p.Name, vpos + Vector2.new(-20, yOff), State.espPlayerColor, 13)
+                                yOff = yOff - 16
+                            end
+                            if State.espShowHP then
+                                local hp = math.floor(ph.Health).."/"..math.floor(ph.MaxHealth)
+                                makeLabel(hp, vpos + Vector2.new(-20, yOff), Color3.fromRGB(100,255,100), 12)
+                                yOff = yOff - 14
+                            end
+                            if State.espShowDist then
+                                makeLabel(math.floor(dist).."m", vpos + Vector2.new(-10, 28), Color3.fromRGB(200,200,200), 11)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Mob ESP
+    if State.mobESP then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and not isPlayerCharacter(obj) then
+                local mr = obj:FindFirstChild("HumanoidRootPart")
+                local mh = obj:FindFirstChildOfClass("Humanoid")
+                if mr and mh and mh.Health > 0 then
+                    local dist = hrp and (hrp.Position - mr.Position).Magnitude or 0
+                    if dist <= State.espRange then
+                        local pos, onScreen = cam:WorldToViewportPoint(mr.Position)
+                        if onScreen then
+                            local vpos = Vector2.new(pos.X, pos.Y)
+                            if State.espBoxes then
+                                makeBox(vpos - Vector2.new(20, 35), Vector2.new(40, 60), State.espMobColor)
+                            end
+                            local yOff = -45
+                            if State.espShowName then
+                                makeLabel(obj.Name, vpos + Vector2.new(-20, yOff), State.espMobColor, 13)
+                                yOff = yOff - 16
+                            end
+                            if State.espShowHP then
+                                local hp = math.floor(mh.Health).."/"..math.floor(mh.MaxHealth)
+                                makeLabel(hp, vpos + Vector2.new(-20, yOff), Color3.fromRGB(255,150,50), 12)
+                                yOff = yOff - 14
+                            end
+                            if State.espShowDist then
+                                makeLabel(math.floor(dist).."m", vpos + Vector2.new(-10, 28), Color3.fromRGB(200,200,200), 11)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local ESPLeft  = Tabs.ESP:AddLeftGroupbox("Player ESP", "user")
+local ESPRight = Tabs.ESP:AddRightGroupbox("Mob ESP", "skull")
+local ESPCfg   = Tabs.ESP:AddLeftGroupbox("Config", "settings")
+
+ESPLeft:AddToggle("PlayerESP", {Text="Player ESP", Default=false, Callback=function(on)
+    State.playerESP = on
+    if on then
+        loop("esp", updateESP)
+    elseif not State.mobESP then
+        disconnect("esp")
+        clearESP()
+    end
+end})
+ESPLeft:AddColorPicker("PlayerESPColor", {Text="Player Color", Default=Color3.fromRGB(255,255,0), Callback=function(v) State.espPlayerColor = v end})
+
+ESPRight:AddToggle("MobESP", {Text="Mob ESP", Default=false, Callback=function(on)
+    State.mobESP = on
+    if on then
+        loop("esp", updateESP)
+    elseif not State.playerESP then
+        disconnect("esp")
+        clearESP()
+    end
+end})
+ESPRight:AddColorPicker("MobESPColor", {Text="Mob Color", Default=Color3.fromRGB(255,50,50), Callback=function(v) State.espMobColor = v end})
+
+ESPCfg:AddToggle("ESPBoxes",    {Text="Boxes",         Default=true,  Callback=function(v) State.espBoxes    = v end})
+ESPCfg:AddToggle("ESPName",     {Text="Show Name",     Default=true,  Callback=function(v) State.espShowName = v end})
+ESPCfg:AddToggle("ESPDist",     {Text="Show Distance", Default=true,  Callback=function(v) State.espShowDist = v end})
+ESPCfg:AddToggle("ESPHP",       {Text="Show HP",       Default=true,  Callback=function(v) State.espShowHP   = v end})
+ESPCfg:AddSlider("ESPRange",    {Text="Range", Default=500, Min=50, Max=2000, Rounding=0, Callback=function(v) State.espRange = v end})
+
+-- ============================================================
+-- WORLD — Attach (thêm vào bên phải World tab)
+-- ============================================================
+local AttachBox = Tabs.World:AddRightGroupbox("Attach", "link")
+
+AttachBox:AddDropdown("AttachTarget", {
+    Values = playerNames(), Default = 1, Text = "Attach Target", Searchable = true,
+    Callback = function(v) State.attachTarget = v end,
+})
+AttachBox:AddSlider("AttachDist",   {Text="Distance", Default=3,  Min=0,  Max=20, Rounding=1, Callback=function(v) State.attachDist   = v end})
+AttachBox:AddSlider("AttachHeight", {Text="Height",   Default=0,  Min=-5, Max=20, Rounding=1, Callback=function(v) State.attachHeight = v end})
+AttachBox:AddButton({Text="Attach / Stop", Func=function()
+    if State.loops["attach"] then
+        disconnect("attach")
+        notify("Grandblue", "Detached.")
+        return
+    end
+    if not State.attachTarget or State.attachTarget == "None" then
+        notify("Grandblue", "No target selected.")
+        return
+    end
+    loop("attach", function()
+        local target = Players:FindFirstChild(State.attachTarget)
+        local hrp = root()
+        local tr = target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and tr then
+            hrp.CFrame = tr.CFrame * CFrame.new(State.attachDist, State.attachHeight, 0)
+        end
+    end)
+    notify("Grandblue", "Attached to "..State.attachTarget)
 end})
 
 Library:Notify({Title="Grandblue", Description="Loaded — no key required.", Time=4})
